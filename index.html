@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>笑顔判定アプリ</title>
+    <!-- Tailwind CSSを読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- face-api.jsを読み込み -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700;800&display=swap" rel="stylesheet">
+    <style>
+        /* 全体のフォントを設定 */
+        body {
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+        }
+
+        /* カメラ映像とキャンバスを重ねるためのコンテナ */
+        #camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: auto;
+            border-radius: 1.5rem; /* 24px */
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            transform: scaleX(-1); /* 鏡のように反転 */
+        }
+        
+        video, canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* アニメーション用のコンテナ */
+        #animation-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            pointer-events: none; /* 下の要素をクリックできるようにする */
+        }
+
+        /* 紙吹雪のスタイル */
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #f00;
+            opacity: 0.7;
+            animation: fall 5s linear infinite;
+        }
+
+        /* 花びらのスタイル */
+        .petal {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M50 0 C10 40, 10 60, 50 100 C90 60, 90 40, 50 0 Z" fill="%23FFC0CB"/></svg>');
+            background-size: contain;
+            animation: fall-petal 7s linear infinite;
+        }
+        
+        /* いいねマークのスタイル */
+        .like-icon {
+            position: absolute;
+            font-size: 4rem;
+            animation: float-up 3s ease-out forwards;
+            opacity: 0;
+        }
+
+        /* キラキラエフェクトのスタイル */
+        .sparkle {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: white;
+            border-radius: 50%;
+            animation: sparkle-anim 1.5s ease-out forwards;
+            box-shadow: 0 0 8px 2px white, 0 0 12px 4px #ffeb3b;
+        }
+
+        /* --- アニメーション定義 --- */
+
+        /* 紙吹雪が落ちるアニメーション */
+        @keyframes fall {
+            0% { transform: translateY(-10vh) rotate(0deg); }
+            100% { transform: translateY(110vh) rotate(720deg); }
+        }
+        
+        /* 花びらが舞うアニメーション */
+        @keyframes fall-petal {
+            0% { transform: translateY(-10vh) rotate(0deg) translateX(0px); }
+            100% { transform: translateY(110vh) rotate(360deg) translateX(100px); }
+        }
+
+        /* いいねが浮かび上がるアニメーション */
+        @keyframes float-up {
+            0% { transform: translateY(0) scale(0.5); opacity: 1; }
+            100% { transform: translateY(-200px) scale(1.5); opacity: 0; }
+        }
+
+        /* キラキラが広がるアニメーション */
+        @keyframes sparkle-anim {
+            0% { transform: scale(0); opacity: 1; }
+            50% { opacity: 1; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+
+    </style>
+</head>
+<body class="bg-gradient-to-br from-yellow-200 via-pink-200 to-blue-300 min-h-screen flex flex-col items-center justify-center p-4 text-center">
+
+    <div id="app-container" class="w-full max-w-4xl mx-auto bg-white/70 backdrop-blur-sm p-6 md:p-8 rounded-3xl shadow-2xl">
+        <h1 class="text-4xl md:text-5xl font-extrabold text-gray-800 mb-2">笑顔判定アプリ</h1>
+        <p class="text-gray-600 mb-6">最高の笑顔を見せてね！</p>
+
+        <!-- ローディング表示 -->
+        <div id="loader" class="flex flex-col items-center justify-center space-y-4 my-8">
+            <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-pink-500"></div>
+            <p class="text-lg text-gray-700">カメラとAIモデルを準備中...</p>
+        </div>
+
+        <!-- カメラとスコア表示 -->
+        <div id="main-content" class="hidden">
+            <div id="camera-container" class="aspect-video bg-gray-900">
+                <video id="video" autoplay muted playsinline></video>
+                <canvas id="canvas"></canvas>
+                <div id="animation-container"></div>
+            </div>
+
+            <div class="mt-8">
+                <p class="text-xl text-gray-700">現在の笑顔スコア</p>
+                <div id="score-container" class="relative w-full h-16 bg-gray-200 rounded-full overflow-hidden mt-2 border-4 border-white shadow-inner">
+                    <div id="score-bar" class="absolute top-0 left-0 h-full bg-gradient-to-r from-pink-500 to-yellow-400 transition-all duration-300 ease-out"></div>
+                    <span id="score" class="absolute inset-0 flex items-center justify-center text-4xl font-bold text-white text-shadow-lg" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">0</span>
+                </div>
+                <p id="message" class="mt-4 text-2xl font-bold text-pink-600 h-8"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM要素を取得
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const loader = document.getElementById('loader');
+        const mainContent = document.getElementById('main-content');
+        const scoreDisplay = document.getElementById('score');
+        const scoreBar = document.getElementById('score-bar');
+        const messageDisplay = document.getElementById('message');
+        const animationContainer = document.getElementById('animation-container');
+
+        // face-api.jsのモデルファイルのパス
+        const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+
+        // アプリの初期設定
+        async function setupApp() {
+            try {
+                // モデルを非同期で読み込む
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+                ]);
+                // カメラをセットアップ
+                await setupCamera();
+            } catch (error) {
+                console.error("モデルの読み込みまたはカメラのセットアップに失敗しました:", error);
+                loader.innerHTML = '<p class="text-red-500">エラーが発生しました。ページを再読み込みしてください。</p>';
+            }
+        }
+
+        // カメラのセットアップ
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+            video.srcObject = stream;
+            video.addEventListener('loadedmetadata', () => {
+                // ローダーを非表示にし、メインコンテンツを表示
+                loader.classList.add('hidden');
+                mainContent.classList.remove('hidden');
+                // 笑顔判定を開始
+                detectSmile();
+            });
+        }
+
+        // 笑顔判定のメイン処理
+        function detectSmile() {
+            setInterval(async () => {
+                // ビデオから顔を検出（表情も一緒に）
+                const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceExpressions();
+                
+                // キャンバスのサイズをビデオに合わせる
+                const displaySize = { width: video.clientWidth, height: video.clientHeight };
+                faceapi.matchDimensions(canvas, displaySize);
+                
+                // キャンバスをクリア
+                const context = canvas.getContext('2d');
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // 顔が検出された場合の処理
+                if (detections.length > 0) {
+                    // 最初の顔の表情を取得
+                    const expressions = detections[0].expressions;
+                    // 「幸福」の確率を取得（0から1の値）
+                    const happiness = expressions.happy;
+                    
+                    // スコアを0から100に変換
+                    const smileScore = Math.round(happiness * 100);
+                    
+                    // UIを更新
+                    updateUI(smileScore);
+
+                } else {
+                    // 顔が検出されなかった場合
+                    updateUI(0, "カメラに顔を映してください");
+                }
+            }, 300); // 300ミリ秒ごとに判定
+        }
+
+        let lastMessage = "";
+        // UI（スコア表示やメッセージ）を更新
+        function updateUI(score, customMessage = null) {
+            scoreDisplay.textContent = score;
+            scoreBar.style.width = `${score}%`;
+            
+            let message = "";
+            if (customMessage) {
+                message = customMessage;
+            } else if (score > 90) {
+                message = "最高の笑顔です！🎉";
+            } else if (score > 70) {
+                message = "とっても良い笑顔！😄";
+            } else if (score > 40) {
+                message = "いい感じ！もっと笑ってみよう！😊";
+            } else if (score > 10) {
+                message = "もう少し！にっこり！🙂";
+            } else {
+                message = "笑顔を探しています...😐";
+            }
+            
+            if (message !== lastMessage) {
+                messageDisplay.textContent = message;
+                lastMessage = message;
+            }
+
+            // スコアが70を超えたらお祝いアニメーションをトリガー
+            if (score > 70) {
+                triggerCelebration();
+            }
+        }
+        
+        let celebrationTimeout = null;
+        // お祝いアニメーションのトリガー
+        function triggerCelebration() {
+            // アニメーションが連続で発生しすぎないように制御
+            if(celebrationTimeout) return;
+            
+            // ランダムでアニメーションを再生
+            const celebrationType = Math.random();
+            if (celebrationType < 0.25) {
+                 createConfetti();
+            } else if (celebrationType < 0.5) {
+                 createPetals();
+            } else if (celebrationType < 0.75) {
+                 createLikeIcon();
+            } else {
+                 createSparkles();
+            }
+            
+            celebrationTimeout = setTimeout(() => {
+                celebrationTimeout = null;
+            }, 500); // 0.5秒待つ
+        }
+        
+        // --- エフェクト生成関数 ---
+
+        // 紙吹雪を生成
+        function createConfetti() {
+            for (let i = 0; i < 20; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                confetti.style.left = Math.random() * 100 + 'vw';
+                confetti.style.backgroundColor = `hsl(${Math.random() * 360}, 100%, 50%)`;
+                confetti.style.animationDuration = Math.random() * 3 + 2 + 's';
+                confetti.style.animationDelay = Math.random() * 2 + 's';
+                animationContainer.appendChild(confetti);
+                setTimeout(() => confetti.remove(), 5000);
+            }
+        }
+
+        // 花びらを生成
+        function createPetals() {
+            for (let i = 0; i < 10; i++) {
+                const petal = document.createElement('div');
+                petal.className = 'petal';
+                petal.style.left = Math.random() * 100 + 'vw';
+                petal.style.animationDuration = Math.random() * 5 + 5 + 's';
+                petal.style.animationDelay = Math.random() * 3 + 's';
+                animationContainer.appendChild(petal);
+                setTimeout(() => petal.remove(), 10000);
+            }
+        }
+
+        // いいねアイコンを生成
+        function createLikeIcon() {
+            const like = document.createElement('div');
+            like.className = 'like-icon';
+            like.textContent = '👍';
+            like.style.left = Math.random() * 80 + 10 + '%'; // 画面の端すぎないように
+            like.style.bottom = '10%';
+            animationContainer.appendChild(like);
+            setTimeout(() => like.remove(), 3000);
+        }
+
+        // キラキラエフェクトを生成
+        function createSparkles() {
+            for (let i = 0; i < 15; i++) {
+                const sparkle = document.createElement('div');
+                sparkle.className = 'sparkle';
+                sparkle.style.top = Math.random() * 100 + '%';
+                sparkle.style.left = Math.random() * 100 + '%';
+                sparkle.style.animationDelay = Math.random() * 1.5 + 's';
+                animationContainer.appendChild(sparkle);
+                setTimeout(() => sparkle.remove(), 2000);
+            }
+        }
+
+        // アプリケーションを開始
+        setupApp();
+    </script>
+</body>
+</html>
